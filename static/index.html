@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LocalVitals</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div><p class="eyebrow">PRIVATE HEALTH TIMELINE</p><h1>LocalVitals</h1></div>
+        <div class="privacy-pill"><span></span> Local only</div>
+      </header>
+
+      <section id="demoBanner" class="demo-banner" hidden>
+        <strong>Demo dataset</strong>
+        <span id="demoSummary">Synthetic records are labeled. Your real blood-pressure database is separate.</span>
+      </section>
+
+      <section class="card agent-card">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">01 · HEALTH AGENT</p>
+            <h2>Ask your whole health timeline</h2>
+            <p class="section-copy">One conversation across blood pressure, meals, movement, heart, and recovery.</p>
+          </div>
+          <span class="status offline">LLM interface reserved</span>
+        </div>
+        <div id="agentMessages" class="agent-messages" aria-live="polite">
+          <div class="message assistant"><span>LocalVitals Agent</span><p>The chat interface is ready. No model is connected, so nothing leaves this device. Later, this endpoint can connect to the local model on your Windows PC.</p></div>
+        </div>
+        <div class="prompt-row">
+          <button type="button" data-agent-prompt="How did sleep, exercise, and meals relate to my blood pressure?">Find relationships</button>
+          <button type="button" data-agent-prompt="Summarize my last 14 days">Summarize 14 days</button>
+          <button type="button" data-agent-prompt="Prepare a factual summary for my doctor">Doctor summary</button>
+        </div>
+        <form id="agentForm" class="agent-compose">
+          <textarea id="agentInput" rows="2" placeholder="Ask about your health data…"></textarea>
+          <button class="button primary" type="submit">Preview request</button>
+        </form>
+        <p class="fine-print">No LLM call yet · no diagnosis · not emergency monitoring</p>
+      </section>
+
+      <section class="card bp-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">02 · BLOOD PRESSURE</p><h2>OMRON BP7255</h2><p class="section-copy">Direct Bluetooth sync without the OMRON app.</p></div>
+          <span id="deviceState" class="status ready">Ready</span>
+        </div>
+        <div class="bp-layout">
+          <div class="latest-reading">
+            <span id="latestTime" class="reading-time">No readings yet</span>
+            <div class="bp-numbers">
+              <div><strong id="latestSys">—</strong><span>SYS</span></div><i>/</i>
+              <div><strong id="latestDia">—</strong><span>DIA</span></div>
+              <div class="pulse"><strong id="latestPulse">—</strong><span>Pulse</span></div>
+            </div>
+            <span id="latestSource" class="badge">No source</span>
+          </div>
+          <div class="bp-controls">
+            <p id="deviceDetails">Automatic discovery · up to 150 seconds</p>
+            <button id="syncButton" class="button secondary">Sync BP7255</button>
+            <button id="syntheticButton" class="button primary">Syn BP data</button>
+            <p id="syncMessage" class="inline-message" role="status"></p>
+          </div>
+        </div>
+        <div class="recent-strip">
+          <div class="strip-heading"><strong>Recent readings</strong><span id="recordCount">0 records</span></div>
+          <div id="recentReadings" class="recent-readings"><p class="empty">No readings.</p></div>
+        </div>
+      </section>
+
+      <section class="card meals-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">03 · MEALS</p><h2>What did I eat?</h2><p class="section-copy">Photo first, model estimate second, your confirmation before saving nutrition.</p></div>
+          <span class="status offline">Vision model offline</span>
+        </div>
+        <div class="meal-layout">
+          <div>
+            <div class="meal-dropzone">
+              <img id="mealPreview" alt="Selected meal preview" hidden>
+              <div id="mealEmpty"><b>Take or choose a meal photo</b><span>Local browser preview only</span></div>
+              <label class="button secondary photo-button">Choose photo<input id="mealPhoto" type="file" accept="image/*" capture="environment"></label>
+            </div>
+            <div class="meal-entry">
+              <input id="mealDescription" type="text" placeholder="Describe the meal or portion">
+              <button id="addMealButton" class="button primary" type="button">Save meal note</button>
+            </div>
+            <p id="mealStatus" class="inline-message">Photos are not uploaded or stored.</p>
+          </div>
+          <div>
+            <div class="nutrition-placeholder">
+              <div><span>Energy estimate</span><strong>— kcal</strong></div>
+              <div><span>Protein</span><strong>— g</strong></div>
+              <div><span>Carbs</span><strong>— g</strong></div>
+              <div><span>Fat</span><strong>— g</strong></div>
+            </div>
+            <div class="meal-history-heading"><strong>Today</strong><span>Estimates stay labeled</span></div>
+            <div id="mealHistory" class="meal-history"><p class="empty">No meals logged.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card apple-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">04 · APPLE HEALTH</p><h2>The useful layer—not every possible field</h2><p class="section-copy">Prioritize signals that provide context for blood pressure and daily behavior.</p></div>
+          <span id="appleSource" class="badge synthetic">Synthetic demo context</span>
+        </div>
+        <div class="apple-vitals">
+          <div><span>Steps</span><strong id="appleSteps">—</strong><small>Daily activity</small></div>
+          <div><span>Exercise</span><strong id="appleExercise">—</strong><small>Minutes</small></div>
+          <div><span>Resting HR</span><strong id="appleResting">—</strong><small>beats/min</small></div>
+          <div><span>HRV</span><strong id="appleHrv">—</strong><small>SDNN · ms</small></div>
+          <div><span>Sleep</span><strong id="appleSleep">—</strong><small>Duration</small></div>
+          <div><span>Workouts</span><strong>—</strong><small>After import</small></div>
+        </div>
+        <div class="health-groups">
+          <article><span class="coverage strong">Recommended</span><h3>Movement &amp; mobility</h3><p>Steps, distance, walking speed, step length, asymmetry, steadiness, stairs.</p></article>
+          <article><span class="coverage partial">Device dependent</span><h3>Heart &amp; exertion</h3><p>Heart rate, resting heart rate, HRV, walking heart rate, active energy, effort.</p></article>
+          <article><span class="coverage missing">Optional</span><h3>Sleep &amp; recovery</h3><p>Sleep stages, respiratory rate, blood oxygen, wrist temperature, cardio fitness.</p></article>
+          <article><span class="coverage strong">Recommended</span><h3>Workouts</h3><p>Workout type, duration, heart rate, distance, energy, and optional GPS route.</p></article>
+        </div>
+      </section>
+
+      <details class="card technical-card">
+        <summary>Local data, exports, and Bluetooth audit</summary>
+        <div class="technical-actions">
+          <a class="button secondary" href="/api/export?format=json">Export JSON</a>
+          <a class="button secondary" href="/api/export?format=csv">Export CSV</a>
+          <span id="dataPath">Database path loading…</span>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Batch</th><th>Measured</th><th>BP</th><th>Pulse</th><th>Database</th><th>Raw data</th></tr></thead><tbody id="transfersBody"><tr><td colspan="6" class="empty">No transfer batches.</td></tr></tbody></table></div>
+      </details>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
