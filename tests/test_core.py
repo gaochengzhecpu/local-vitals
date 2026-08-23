@@ -1,13 +1,19 @@
 import json
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ble_bp7255 import parse_measurement
 from database import Store, seed_demo
+from app import LocalVitalsHandler
 
 
 class ParserTests(unittest.TestCase):
@@ -94,6 +100,24 @@ class StoreTests(unittest.TestCase):
         sources = {record["source_model"] for record in demo_store.all()}
         self.assertNotIn("Copied real BP · demo only", sources)
         self.assertIn("Synthetic BP context · demo only", sources)
+        newest_background = max(
+            datetime.fromisoformat(record["timestamp"])
+            for record in demo_store.all()
+        )
+        self.assertLess(newest_background.date(), datetime.now().date())
+        button_record = {
+            **self.record,
+            "timestamp": datetime.now().isoformat(timespec="milliseconds"),
+            "systolic": 119,
+            "diastolic": 80,
+            "pulse": 83,
+            "source_model": "Synthetic button · demo only",
+            "device_address": None,
+        }
+        self.assertTrue(demo_store.add(button_record))
+        self.assertEqual(
+            demo_store.all()[0]["source_model"], "Synthetic button · demo only"
+        )
         demo_store.connection.close()
 
     def test_adds_local_meal_note(self):
@@ -101,6 +125,83 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(meal["description"], "Rice and vegetables")
         self.assertEqual(meal["data_class"], "real")
         self.assertEqual(len(self.store.meals()), 1)
+
+    def test_serializes_concurrent_writes(self):
+        def add(index):
+            return self.store.add_meal({"description": f"Meal {index}"})
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            meals = list(pool.map(add, range(40)))
+        self.assertEqual(len(meals), 40)
+        self.assertEqual(len(self.store.meals()), 40)
+
+
+class ApiTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.tempdir.name) / "api.db")
+        manifest = seed_demo(self.store)
+
+        class TestHandler(LocalVitalsHandler):
+            def log_message(self, _format, *args):
+                pass
+
+        TestHandler.store = self.store
+        TestHandler.data_dir = Path(self.tempdir.name)
+        TestHandler.demo_mode = True
+        TestHandler.demo_manifest = manifest
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), TestHandler)
+        self.server.daemon_threads = True
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.store.connection.close()
+        self.tempdir.cleanup()
+
+    def request(self, path, method="GET", payload=None):
+        body = json.dumps(payload).encode() if payload is not None else None
+        request = urllib.request.Request(
+            self.base_url + path,
+            data=body,
+            method=method,
+            headers={
+                "X-Local-Vitals": "1",
+                **({"Content-Type": "application/json"} if body else {}),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            return response.status, json.loads(response.read())
+
+    def test_demo_api_end_to_end(self):
+        status_code, status = self.request("/api/status")
+        self.assertEqual(status_code, 200)
+        self.assertTrue(status["demo_mode"])
+
+        status_code, result = self.request(
+            "/api/demo/synthetic-reading", method="POST", payload={}
+        )
+        self.assertEqual(status_code, 200)
+        self.assertEqual(
+            (
+                result["record"]["systolic"],
+                result["record"]["diastolic"],
+                result["record"]["pulse"],
+            ),
+            (119, 80, 83),
+        )
+        _, records = self.request("/api/records")
+        self.assertEqual(records["records"][0]["source_model"], "Synthetic button · demo only")
+
+        status_code, meal = self.request(
+            "/api/meals", method="POST", payload={"description": "Test meal"}
+        )
+        self.assertEqual(status_code, 201)
+        self.assertEqual(meal["meal"]["description"], "Test meal")
 
 
 if __name__ == "__main__":

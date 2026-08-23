@@ -284,11 +284,7 @@ def main() -> int:
     LocalVitalsHandler.data_dir = args.data_dir
     LocalVitalsHandler.demo_mode = args.demo
     if args.demo:
-        real_store = Store(DEFAULT_DATA_DIR / "local-vitals.db")
-        LocalVitalsHandler.demo_manifest = seed_demo(
-            LocalVitalsHandler.store, real_store.all()
-        )
-        real_store.connection.close()
+        LocalVitalsHandler.demo_manifest = seed_demo(LocalVitalsHandler.store)
     else:
         LocalVitalsHandler.demo_manifest = {}
     # A browser can keep one localhost connection open. Serving each request in

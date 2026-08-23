@@ -1,5 +1,7 @@
 # LocalVitals
 
+[![tests](https://github.com/gaochengzhecpu/local-vitals/actions/workflows/tests.yml/badge.svg)](https://github.com/gaochengzhecpu/local-vitals/actions/workflows/tests.yml)
+
 LocalVitals is a local-first health timeline prototype. Its working core reads blood-pressure measurements directly from an OMRON BP7255 over Bluetooth Low Energy, without OMRON Connect or a cloud account. The UI also contains privacy-conscious prototypes for a health-agent chat, meal photo logging, and Apple Health context.
 
 > Personal recordkeeping prototype only. It does not diagnose conditions, provide medical advice, or provide emergency monitoring.
@@ -93,6 +95,8 @@ LocalVitals deliberately does **not** send an unverified transfer acknowledgemen
 python3 -m unittest discover -s tests -v
 node --check static/app.js
 ```
+
+GitHub Actions runs the Python, JavaScript, shell, unit, concurrency, and HTTP API checks on every push and pull request.
 
 ## Known limitations
 

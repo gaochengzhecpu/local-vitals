@@ -10,5 +10,9 @@ __pycache__/
 data/
 demo-data/
 export.zip
+export*.zip
+export.xml
+export_cda.xml
+*health*export*.zip
 apple_health_export/
 *.gpx

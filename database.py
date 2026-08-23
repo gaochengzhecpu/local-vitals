@@ -6,8 +6,10 @@ import io
 import json
 import random
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, time, timedelta
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -27,9 +29,20 @@ EXPORT_FIELDS = [
 ]
 
 
+def synchronized(method):
+    """Serialize access to the shared SQLite connection, including nested calls."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapped
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = path
+        self._lock = threading.RLock()
         path.parent.mkdir(parents=True, exist_ok=True)
         # The localhost UI serves requests concurrently. Python's SQLite build
         # is serialized, so allow those request threads to share this connection.
@@ -162,6 +175,7 @@ class Store:
         clean["imported_at"] = clean.get("imported_at") or datetime.now().isoformat()
         return clean
 
+    @synchronized
     def add(self, record: dict[str, Any]) -> bool:
         clean = self._validated(record)
         fingerprint = self._fingerprint(clean)
@@ -195,6 +209,7 @@ class Store:
         except sqlite3.IntegrityError:
             return False
 
+    @synchronized
     def all(self) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             "SELECT * FROM measurements ORDER BY COALESCE(timestamp, imported_at) DESC"
@@ -204,6 +219,7 @@ class Store:
             for row in rows
         ]
 
+    @synchronized
     def log_sync_batch(
         self, records: list[dict[str, Any]], insert_results: list[bool]
     ) -> str:
@@ -258,6 +274,7 @@ class Store:
         self.connection.commit()
         return batch_id
 
+    @synchronized
     def finish_sync_batch(
         self, batch_id: str, acknowledged: bool, error: str | None = None
     ) -> None:
@@ -267,6 +284,7 @@ class Store:
         )
         self.connection.commit()
 
+    @synchronized
     def sync_batches(self, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             "SELECT * FROM sync_batches ORDER BY received_at DESC LIMIT ?",
@@ -297,6 +315,7 @@ class Store:
             batches.append(batch)
         return batches
 
+    @synchronized
     def add_health_sample(self, sample: dict[str, Any]) -> bool:
         metric = str(sample["metric"])
         start_time = str(sample["start_time"])
@@ -335,6 +354,7 @@ class Store:
         except sqlite3.IntegrityError:
             return False
 
+    @synchronized
     def health_samples(self) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             """
@@ -346,6 +366,7 @@ class Store:
         ).fetchall()
         return [{key: row[key] for key in row.keys()} for row in rows]
 
+    @synchronized
     def add_meal(self, meal: dict[str, Any]) -> dict[str, Any]:
         description = str(meal.get("description") or "").strip()
         if not description:
@@ -383,12 +404,14 @@ class Store:
         self.connection.commit()
         return entry
 
+    @synchronized
     def meals(self) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             "SELECT * FROM meal_entries ORDER BY eaten_at DESC"
         ).fetchall()
         return [{key: row[key] for key in row.keys()} for row in rows]
 
+    @synchronized
     def daily_context(self) -> list[dict[str, Any]]:
         days: dict[str, dict[str, Any]] = {}
 
@@ -454,6 +477,7 @@ class Store:
             result.append(bucket)
         return result
 
+    @synchronized
     def delete_all(self) -> int:
         count = self.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0]
         self.connection.execute("DELETE FROM sync_deliveries")
@@ -464,6 +488,7 @@ class Store:
         self.connection.commit()
         return count
 
+    @synchronized
     def export_json(self) -> str:
         records = [
             {field: record.get(field) for field in EXPORT_FIELDS}
@@ -479,6 +504,7 @@ class Store:
             indent=2,
         )
 
+    @synchronized
     def export_csv(self) -> str:
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=EXPORT_FIELDS)
@@ -487,6 +513,7 @@ class Store:
             writer.writerow({field: record.get(field) for field in EXPORT_FIELDS})
         return output.getvalue()
 
+    @synchronized
     def import_text(self, content: str, format_name: str) -> dict[str, int]:
         if format_name == "json":
             payload = json.loads(content)
@@ -527,19 +554,28 @@ def _seed_demo_meals(store: Store, anchor_day) -> int:
     return len(meals)
 
 
-def seed_demo(store: Store, real_records: list[dict[str, Any]]) -> dict[str, int]:
+def seed_demo(
+    store: Store, _real_records: list[dict[str, Any]] | None = None
+) -> dict[str, int]:
     """Create a deterministic, clearly labeled demo without touching the real store."""
     if store.health_samples():
         # Older demo versions copied real BP values. Remove only those demo
-        # copies so presentations never reveal the user's actual measurements.
-        removed = store.connection.execute(
-            "DELETE FROM measurements WHERE source_model LIKE 'Copied real BP%'"
-        ).rowcount
-        store.connection.commit()
-        latest_health_day = datetime.fromisoformat(
-            store.health_samples()[0]["start_time"]
-        ).date()
-        _seed_demo_meals(store, latest_health_day)
+        # copies and same-day background samples so the button reading is latest.
+        today = datetime.now().date().isoformat()
+        with store._lock:
+            removed = store.connection.execute(
+                "DELETE FROM measurements WHERE source_model LIKE 'Copied real BP%'"
+            ).rowcount
+            removed_same_day = store.connection.execute(
+                """
+                DELETE FROM measurements
+                WHERE source_model = 'Synthetic BP context · demo only'
+                  AND substr(timestamp, 1, 10) >= ?
+                """,
+                (today,),
+            ).rowcount
+            store.connection.commit()
+        _seed_demo_meals(store, datetime.now().date())
         records = store.all()
         return {
             "bp_records": len(records),
@@ -549,20 +585,17 @@ def seed_demo(store: Store, real_records: list[dict[str, Any]]) -> dict[str, int
                 record["source_model"].startswith("Synthetic") for record in records
             ),
             "removed_real_bp_copies": removed,
+            "removed_same_day_background": removed_same_day,
             "synthetic_meals": sum(
                 meal["data_class"] == "synthetic" for meal in store.meals()
             ),
         }
 
     rng = random.Random(7255)
-    dated_real = [record for record in real_records if record.get("timestamp")]
-    if dated_real:
-        latest_timestamp = max(record["timestamp"] for record in dated_real)
-        anchor = datetime.fromisoformat(latest_timestamp).replace(tzinfo=None)
-    else:
-        anchor = datetime.now().replace(microsecond=0)
-    anchor_day = anchor.date()
-    _seed_demo_meals(store, anchor_day)
+    # End the generated timeline yesterday. A user-triggered sample created now
+    # is therefore always the newest BP record returned by the API.
+    anchor_day = (datetime.now() - timedelta(days=1)).date()
+    _seed_demo_meals(store, datetime.now().date())
 
     synthetic_bp = 0
     health_count = 0
